@@ -1,0 +1,71 @@
+# Xcode
+#
+# gitignore contributors: remember to keep this file simple and
+# focused on Xcode. Almost all other ignore patterns belong in
+# 'Global C++.gitignore', 'Global ObjC.gitignore', 'Global Swift.gitignore'
+# or other more specific .gitignore files.
+
+## User-specific files
+*.xcuserdatad/
+*.mode1v3
+*.mode2v3
+*.pbxuser
+*.perspectivev3
+*.xcuserstate
+xcuserdata/
+
+## Build generated
+build/
+DerivedData/
+*.hmap
+*.ipa
+*.dSYM/
+
+## Various settings
+*.moved-aside
+*.xcscheme
+
+## Swift Package Manager
+#
+# Add this line if you want to avoid checking in source code from Swift Package Manager dependencies.
+# *.xcodeproj/*
+# !*.xcodeproj/project.pbxproj
+# !*.xcodeproj/project.xcworkspace
+# !*.xcodeproj/xcshareddata
+# !Package.swift
+# !Package.resolved
+.build/
+Packages/
+SourcePackages/
+
+## Cocoapods
+#
+# We recommend against adding the Pods directory to your .gitignore. However
+# you should judge for yourself, the pros and cons are mentioned at:
+# https://guides.cocoapods.org/using/using-cocoapods.html#should-i-check-the-pods-directory-into-source-control
+#
+# Pods/
+
+## Carthage
+#
+# Add this line if you want to avoid checking in source code from Carthage dependencies.
+# Carthage/Checkouts
+Carthage/Build/
+
+## fastlane
+#
+# It is recommended to not store the screenshots in the git repo. Instead, use fastlane to re-generate the
+# screenshots whenever they are needed.
+# For more information about the recommended setup visit:
+# https://docs.fastlane.tools/best-practices/source-control/#source-control
+
+fastlane/report.xml
+fastlane/Preview.html
+fastlane/screenshots/**/*.png
+fastlane/test_output
+
+## Realm
+# realm-object-server/
+
+## .DS_Store
+.DS_Store
