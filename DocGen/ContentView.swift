@@ -679,22 +679,27 @@ struct ContentView: View {
                     .padding(.bottom, 4)
                     .background(Color.clear) // No background
 
-                    Text(label("Swift 정적 분석기", "Swift Static Analyzer"))
-                        .font(.system(size: 36, weight: .heavy, design: .rounded))
-                        .foregroundStyle(
-                            LinearGradient(
-                                gradient: Gradient(stops: [
-                                    .init(color: .blue.opacity(0.9), location: 0.0),
-                                    .init(color: .indigo, location: 0.4),
-                                    .init(color: .purple.opacity(0.85), location: 0.7),
-                                    .init(color: .pink.opacity(0.9), location: 1.0)
-                                ]),
-                                startPoint: .leading,
-                                endPoint: .trailing
+                    HStack(spacing: 0) {
+                        Text("Swift")
+                            .font(.system(size: 36, weight: .heavy, design: .rounded))
+                            .foregroundStyle(
+                                LinearGradient(
+                                    gradient: Gradient(stops: [
+                                        .init(color: .blue.opacity(0.9), location: 0.0),
+                                        .init(color: .indigo, location: 0.4),
+                                        .init(color: .purple.opacity(0.85), location: 0.7),
+                                        .init(color: .pink.opacity(0.9), location: 1.0)
+                                    ]),
+                                    startPoint: .leading,
+                                    endPoint: .trailing
+                                )
                             )
-                        )
-                        .shadow(color: .black.opacity(0.12), radius: 1.5, x: 0, y: 1.2)
-                        .padding(.bottom, 6)
+                        Text(label(" 정적 분석기", " Static Analyzer"))
+                            .font(.system(size: 36, weight: .heavy, design: .rounded))
+                            .foregroundColor(.primary)
+                    }
+                    .shadow(color: .black.opacity(0.12), radius: 1.5, x: 0, y: 1.2)
+                    .padding(.bottom, 6)
 
                     Divider()
                         .padding(.bottom, 2)
