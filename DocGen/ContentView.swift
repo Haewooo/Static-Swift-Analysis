@@ -93,21 +93,61 @@ struct ContentView: View {
         return total / Double(analyses.count)
     }
 
+    /// 파일 품질점수 산정 공식(상한/하한, 감점 항목 구조화)
     func fileQualityScore(_ f: DocGenCore.FileAnalysisResult) -> Double {
-        var score = 100.0
+        // 점수 상한/하한(사용자 커스텀 가능)
+        let maxScore: Double = 100.0
+        let minScore: Double = 0.0
+
+        // 감점 기준(사용자 커스텀 가능)
+        let penaltyCritical: Double = 5.0
+        let penaltyHigh: Double = 3.0
+        let penaltyMedium: Double = 2.0
+        let penaltyLow: Double = 1.0
+        let penaltyInfo: Double = 0.0
+        let penaltyLongFunc: Double = 5.0 // 긴 함수 경고 감점
+        let penaltyManyLines: Double = 5.0 // 파일 라인 수 초과 감점
+        let penaltyLongAvgFunc: Double = 5.0 // 평균 함수 길이 초과 감점
+        let longFuncThreshold: Int = 40 // 긴 함수 기준
+        let manyLinesThreshold: Int = 600 // 파일 라인 수 기준
+
+        var score = maxScore
+
+        // 1. 경고별 감점 (중복 감점 방지: 긴 함수 경고는 별도 처리)
+        var longFunctionWarned = false
         for warning in f.warnings {
+            // 긴 함수 경고는 별도 집계
+            if warning.type == .longFunction {
+                longFunctionWarned = true
+                continue
+            }
             switch warning.severity {
-            case .critical: score -= 5
-            case .high: score -= 3
-            case .medium: score -= 2
-            case .low: score -= 1
-            default: break
+            case .critical: score -= penaltyCritical
+            case .high: score -= penaltyHigh
+            case .medium: score -= penaltyMedium
+            case .low: score -= penaltyLow
+            case .info: score -= penaltyInfo
             }
         }
-        if f.lines > 600 { score -= 5 }
-        if f.avgFuncLength > 40 { score -= 5 }
-        if score < 0 { score = 0 }
-        return score
+
+        // 2. 긴 함수 경고 감점 (여러 개여도 1회만 감점)
+        if longFunctionWarned {
+            score -= penaltyLongFunc
+        }
+
+        // 3. 파일 라인 수, 평균 함수 길이 감점
+        // 긴 함수 경고가 있으면 중복 감점 방지(긴 함수 경고가 없을 때만 적용)
+        if !longFunctionWarned {
+            if f.lines > manyLinesThreshold {
+                score -= penaltyManyLines
+            }
+            if f.avgFuncLength > Double(longFuncThreshold) {
+                score -= penaltyLongAvgFunc
+            }
+        }
+
+        // 점수 상한/하한을 min/max로 보장
+        return min(maxScore, max(minScore, score))
     }
 
     func warningColor(_ severity: DocGenCore.Severity) -> Color {
@@ -220,28 +260,34 @@ struct ContentView: View {
                 x: .value(label("비율", "Ratio"), codePct),
                 y: .value(label("구성", "Category"), label("전체 코드", "Code"))
             )
-                .foregroundStyle(.blue)
+                .foregroundStyle(Color.blue.opacity(0.85))
                 .annotation(position: .overlay) {
                     Text(label(String(format: "%.0f%% 코드", codePct), String(format: "%.0f%% Code", codePct)))
-                        .font(.caption2).foregroundColor(.white)
+                        .font(.caption2)
+                        .foregroundColor(.white)
+                        .shadow(color: .black.opacity(0.3), radius: 0.5, x: 0, y: 0.5)
                 }
             BarMark(
                 x: .value(label("비율", "Ratio"), commentPct),
                 y: .value(label("구성", "Category"), label("전체 코드", "Code"))
             )
-                .foregroundStyle(.green)
+                .foregroundStyle(Color.teal)
                 .annotation(position: .overlay) {
                     Text(label(String(format: "%.0f%% 주석", commentPct), String(format: "%.0f%% Comment", commentPct)))
-                        .font(.caption2).foregroundColor(.white)
+                        .font(.caption2)
+                        .foregroundColor(.white)
+                        .shadow(color: .black.opacity(0.3), radius: 0.5, x: 0, y: 0.5)
                 }
             BarMark(
                 x: .value(label("비율", "Ratio"), blankPct),
                 y: .value(label("구성", "Category"), label("전체 코드", "Code"))
             )
-                .foregroundStyle(.gray)
+                .foregroundStyle(Color.orange.opacity(0.7))
                 .annotation(position: .overlay) {
                     Text(label(String(format: "%.0f%% 공백", blankPct), String(format: "%.0f%% Blank", blankPct)))
-                        .font(.caption2).foregroundColor(.white)
+                        .font(.caption2)
+                        .foregroundColor(.white)
+                        .shadow(color: .black.opacity(0.3), radius: 0.5, x: 0, y: 0.5)
                 }
         }
         .frame(height: 70)
@@ -544,103 +590,136 @@ struct ContentView: View {
     }
 
     private var actionControls: some View {
-        VStack(spacing: 12) {
-            Button(action: runDocGen) {
-                HStack {
-                    if isProcessing {
-                        ProgressView()
-                            .progressViewStyle(.circular)
-                            .tint(.white)
-                            .padding(.trailing, 5)
-                        Text(label("분석 중...", "Analyzing..."))
-                            .fontWeight(.semibold)
-                    } else {
-                        Image(systemName: "doc.text.magnifyingglass")
-                            .font(.title3)
-                        Text(label("분석 시작", "Analyze"))
-                            .fontWeight(.semibold)
-                            .font(.headline)
+        HStack {
+            Spacer()
+            VStack {
+                Spacer(minLength: 20)
+                VStack(spacing: 12) {
+                    Button(action: runDocGen) {
+                        HStack {
+                            if isProcessing {
+                                ProgressView()
+                                    .progressViewStyle(.circular)
+                                    .tint(.white)
+                                    .padding(.trailing, 5)
+                                Text(label("분석 중...", "Analyzing..."))
+                                    .fontWeight(.semibold)
+                            } else {
+                                Image(systemName: "doc.text.magnifyingglass")
+                                    .font(.title3)
+                                Text(label("분석 시작", "Analyze"))
+                                    .fontWeight(.semibold)
+                                    .font(.headline)
+                            }
+                        }
+                        .frame(width: 180)
+                        .padding(.vertical, 12)
+                        .padding(.horizontal, 16)
+                        .background {
+                            if !(rootPath.isEmpty || isProcessing) {
+                                RoundedRectangle(cornerRadius: 12)
+                                    .fill(
+                                        LinearGradient(
+                                            gradient: Gradient(stops: [
+                                                .init(color: .blue.opacity(0.9), location: 0.0),
+                                                .init(color: .indigo, location: 0.4),
+                                                .init(color: .purple.opacity(0.85), location: 0.7),
+                                                .init(color: .pink.opacity(0.9), location: 1.0)
+                                            ]),
+                                            startPoint: .leading,
+                                            endPoint: .trailing
+                                        )
+                                    )
+                            } else {
+                                RoundedRectangle(cornerRadius: 12)
+                                    .fill(Color.gray.opacity(0.3))
+                            }
+                        }
+                        .foregroundColor((rootPath.isEmpty || isProcessing) ? Color.gray.opacity(0.7) : Color.white)
                     }
-                }
-                .padding(.vertical, 10)
-                .padding(.horizontal, 20)
-                .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.large)
-            .tint(.accentColor)
-            .disabled(rootPath.isEmpty || outputPath.isEmpty || isProcessing)
-            .animation(.easeInOut, value: isProcessing)
+                    .buttonStyle(.plain)
+                    .disabled(rootPath.isEmpty || isProcessing)
+                    .animation(.easeInOut, value: isProcessing)
 
-            HStack {
-                Spacer()
-                Toggle(isOn: $showDetailedResult) {
-                    Text(label("상세 결과 보기", "Show Detailed Result"))
-                        .font(.caption)
+                    Toggle(isOn: $showDetailedResult) {
+                        Text(label("상세 결과 보기", "Show detailed result"))
+                            .font(.caption)
+                    }
+                    .toggleStyle(.switch)
+                    .frame(maxWidth: 240)
                 }
-                .toggleStyle(.switch)
+                .padding(.top, 24) // 버튼을 더 아래로 내림
             }
-            .padding(.top, 5)
-
-            if isProcessing {
-                ProgressView(label("파일 분석 중입니다. 잠시만 기다려주세요...", "Analyzing files. Please wait..."))
-                    .progressViewStyle(LinearProgressViewStyle())
-                    .padding(.top, 8)
-            }
+            Spacer()
         }
-        .padding(.vertical, 15)
+        .padding(.vertical, 12)
+        .padding(.horizontal, 8)
     }
     
 
     var body: some View {
-        ScrollView(.vertical) {
-            VStack(alignment: .leading, spacing: 20) {
-                HStack {
+        ZStack(alignment: .bottom) {
+            ScrollView(.vertical) {
+                VStack(alignment: .leading, spacing: 20) {
+                    HStack {
+                        Spacer()
+                        Picker(selection: $appLanguage, label: EmptyView()) {
+                            Text("한국어").tag("ko")
+                            Text("English").tag("en")
+                        }
+                        .pickerStyle(SegmentedPickerStyle())
+                        .frame(width: 160)
+                        .onChange(of: appLanguage) { newLang in
+                            DocGenCore.currentLanguage = newLang
+                            status = newLang == "en" ? "Ready to start analysis." : "시작할 준비가 되었습니다."
+                        }
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.top, 12)
+                    .padding(.bottom, 4)
+                    .background(Color.clear) // No background
+
+                    Text(label("Swift 정적 분석기", "Swift Static Analyzer"))
+                        .font(.system(size: 36, weight: .heavy, design: .rounded))
+                        .foregroundStyle(
+                            LinearGradient(
+                                gradient: Gradient(stops: [
+                                    .init(color: .blue.opacity(0.9), location: 0.0),
+                                    .init(color: .indigo, location: 0.4),
+                                    .init(color: .purple.opacity(0.85), location: 0.7),
+                                    .init(color: .pink.opacity(0.9), location: 1.0)
+                                ]),
+                                startPoint: .leading,
+                                endPoint: .trailing
+                            )
+                        )
+                        .shadow(color: .black.opacity(0.12), radius: 1.5, x: 0, y: 1.2)
+                        .padding(.bottom, 6)
+
+                    Divider()
+                        .padding(.bottom, 2)
+
+                    pathInputGroup
+                    overallQualityHeader
+                    dashboardHStack
+                    Divider()
+                    searchSortControls
+                    fileTableView
+                    if let detail = selectedFile, showDetailedResult {
+                        fileDetailGroup(detail: detail)
+                    }
+                    logGroup
                     Spacer()
-                    Picker(selection: $appLanguage, label: EmptyView()) {
-                        Text("한국어").tag("ko")
-                        Text("English").tag("en")
-                    }
-                    .pickerStyle(SegmentedPickerStyle())
-                    .frame(width: 160)
-                    .onChange(of: appLanguage) { newLang in
-                        DocGenCore.currentLanguage = newLang
-                        status = newLang == "en" ? "Ready to start analysis." : "시작할 준비가 되었습니다."
-                    }
+                    statusText
                 }
-                .padding(.horizontal, 12)
-                .padding(.top, 12)
-                .padding(.bottom, 4)
-                .background(.ultraThinMaterial)
-                .cornerRadius(10)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 10)
-                        .stroke(Color.primary.opacity(0.05), lineWidth: 0.5)
-                )
-                .shadow(radius: 1, y: 0.5)
-
-                Text(label("Swift 정적 분석기", "Swift Static Analysis"))
-                    .font(.system(size: 36, weight: .bold, design: .rounded))
-                    .padding(.bottom, 6)
-
-                Divider()
-                    .padding(.bottom, 2)
-
-                pathInputGroup
-                overallQualityHeader
-                dashboardHStack
-                Divider()
-                searchSortControls
-                fileTableView
-                if let detail = selectedFile, showDetailedResult {
-                    fileDetailGroup(detail: detail)
-                }
-                logGroup
-                Spacer()
-                statusText
-                actionControls
+                .padding(32)
             }
-            .padding(32)
+
+            VStack(spacing: 0) {
+                Divider()
+                actionControls
+                    .padding()
+            }
         }
         .frame(minWidth: 900, idealWidth: 1150, maxWidth: .infinity,
                minHeight: 620, idealHeight: 800, maxHeight: .infinity)
@@ -679,7 +758,7 @@ struct ContentView: View {
     }
 
     private func runDocGen() {
-        guard !rootPath.isEmpty, !outputPath.isEmpty else { return }
+        guard !rootPath.isEmpty else { return }
         isProcessing = true
         status = label("분석 중…", "Analyzing...")
         logMessages.append(label("▶️ 분석 시작: \(Date())\n  Root: \(rootPath)\n  Output: \(outputPath)", "▶️ Analysis started: \(Date())\n  Root: \(rootPath)\n  Output: \(outputPath)"))
@@ -689,7 +768,7 @@ struct ContentView: View {
         if recentOutputPaths.count > 3 { recentOutputPaths = Array(recentOutputPaths.prefix(3)) }
 
         DispatchQueue.global().async {
-            let dashboard: DocGenCore.AnalysisDashboard = DocGenCore.generate(rootPath: rootPath, outputPath: outputPath)
+            let dashboard: DocGenCore.AnalysisDashboard = DocGenCore.generate(rootPath: rootPath, outputPath: outputPath.isEmpty ? "" : outputPath)
             DispatchQueue.main.async {
                 isProcessing = false
                 analyses = dashboard.analyses

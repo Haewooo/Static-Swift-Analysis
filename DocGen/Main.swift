@@ -1,3 +1,66 @@
+import SourceKittenFramework
+// MARK: - AST 기반 분석기 연동
+
+extension DocGenCore {
+    // 활성화할 규칙 목록 (추후 확장 예정)
+    static var activeASTRules: [SimpleASTCapableRule] = [
+        LongFunctionASTRule(maxBodyLines: 60), // 기존 규칙, 임계값 60으로 설정
+        UnresolvedTagASTRule(),
+        DuplicateFunctionASTRule(),
+        HighComplexityASTRule(maxComplexityAllowed: 15) // 새 규칙, 최대 복잡도 15로 설정
+        // 추가적인 AST 기반 규칙은 여기에 선언
+    ]
+
+    /// AST 기반 파일 분석 (SimpleASTCapableRule 기반 엔진)
+    static func analyzeFileUsingAST(filePath: String, relativePath: String) -> FileAnalysisResult? {
+        guard let fileObject = File(path: filePath) else {
+            let warning = Warning(id: UUID(), filePath: relativePath, line: nil, type: .securityIssue, severity: .high,
+                                  message_ko: "파일 객체를 생성할 수 없습니다 (AST 분석).",
+                                  message_en: "Failed to create File object (AST analysis).")
+            return FileAnalysisResult(id: UUID(), file: relativePath, lines: 0, codeLines: 0, commentLines: 0, blankLines: 0, funcCount: 0, avgFuncLength: 0, longestFunc: 0, warnings: [warning])
+        }
+        let astAnalyzer = ASTAnalyzer()
+        guard let ast = astAnalyzer.parseAST(for: filePath) else {
+            let warning = Warning(id: UUID(), filePath: relativePath, line: nil, type: .styleViolation, severity: .medium,
+                                  message_ko: "AST 파싱 실패.", message_en: "Failed to parse AST.")
+            return FileAnalysisResult(id: UUID(), file: relativePath, lines: 0, codeLines: 0, commentLines: 0, blankLines: 0, funcCount: 0, avgFuncLength: 0, longestFunc: 0, warnings: [warning])
+        }
+
+        // 규칙 기반 경고 집계
+        var allWarningsForFile: [Warning] = []
+
+        // 코드/주석/공백/전체 라인 등은 기존 방식 유지
+        guard let fileContent = try? String(contentsOfFile: filePath, encoding: .utf8) else { return nil }
+        let (code, comment, blank) = analyzeLineTypes(fileContent)
+        let lines = fileContent.components(separatedBy: .newlines).count
+
+        // 함수 통계: AST에서 추출, 평균/최장 자동 산출
+        let functions = astAnalyzer.extractFunctions(from: ast.dictionary, fileContent: fileContent, filePath: filePath)
+        let funcCount = functions.count
+        let funcBodyLens = functions.compactMap { $0.bodyCodeLineCount ?? $0.bodyLineCount }
+        let avgFuncLength = funcBodyLens.isEmpty ? 0.0 : Double(funcBodyLens.reduce(0, +)) / Double(funcBodyLens.count)
+        let longestFunc = funcBodyLens.max() ?? 0
+
+        // AST 기반 규칙 평가 및 경고 수집
+        for rule in activeASTRules {
+            let warnings = rule.analyze(ast: ast, file: fileObject)
+            allWarningsForFile.append(contentsOf: warnings)
+        }
+
+        return FileAnalysisResult(
+            id: UUID(),
+            file: relativePath,
+            lines: lines,
+            codeLines: code,
+            commentLines: comment,
+            blankLines: blank,
+            funcCount: funcCount,
+            avgFuncLength: avgFuncLength,
+            longestFunc: longestFunc,
+            warnings: allWarningsForFile
+        )
+    }
+}
 //
 //  Main.swift
 //  DocGen
@@ -104,24 +167,28 @@ class DocGenCore {
         }
     }
 
-    struct Warning: Identifiable, Equatable {
-        let id: UUID
-        let filePath: String
-        let line: Int?
-        let type: WarningType
-        let severity: Severity
-        let message_ko: String
-        let message_en: String
-        let suggestion_ko: String?
-        let suggestion_en: String?
-        var message: String {
+    public struct Warning: Identifiable, Equatable {
+        public let id: UUID
+        public let filePath: String
+        public let line: Int?
+        public let offset: Int64?
+        public let length: Int64?
+        public let type: WarningType
+        public let severity: Severity
+        public let message_ko: String
+        public let message_en: String
+        public let suggestion_ko: String?
+        public let suggestion_en: String?
+
+        public var message: String {
             switch DocGenCore.currentLanguage {
             case "en": return message_en
             case "ko": fallthrough
             default: return "\(message_ko) (\(message_en))"
             }
         }
-        var suggestion: String? {
+
+        public var suggestion: String? {
             switch DocGenCore.currentLanguage {
             case "en": return suggestion_en
             case "ko": fallthrough
@@ -137,14 +204,21 @@ class DocGenCore {
                 }
             }
         }
-        static func == (lhs: Warning, rhs: Warning) -> Bool {
+
+        public static func == (lhs: Warning, rhs: Warning) -> Bool {
             lhs.id == rhs.id
         }
-        // 생성자 보조
-        init(id: UUID, filePath: String, line: Int?, type: WarningType, severity: Severity, message_ko: String, message_en: String, suggestion_ko: String? = nil, suggestion_en: String? = nil) {
+
+        public init(id: UUID = UUID(), filePath: String, line: Int?,
+                    offset: Int64? = nil, length: Int64? = nil, // offset, length 파라미터
+                    type: WarningType, severity: Severity,
+                    message_ko: String, message_en: String,
+                    suggestion_ko: String? = nil, suggestion_en: String? = nil) {
             self.id = id
             self.filePath = filePath
             self.line = line
+            self.offset = offset // 할당
+            self.length = length // 할당
             self.type = type
             self.severity = severity
             self.message_ko = message_ko
@@ -190,58 +264,26 @@ class DocGenCore {
         var totalCode = 0, totalComment = 0, totalBlank = 0
         var totalFunc = 0
         var warnings: [Warning] = []
-        var totalQualityScore = 100.0
         var smellCount = 0
         for filePath in swiftFiles {
             let relativePath = filePath.replacingOccurrences(of: rootPath + "/", with: "")
-            guard let content = try? String(contentsOfFile: filePath, encoding: .utf8) else {
-                warnings.append(
-                    Warning(
-                        id: UUID(),
-                        filePath: relativePath,
-                        line: nil,
-                        type: .securityIssue,
-                        severity: .high,
-                        message_ko: "파일을 읽을 수 없습니다.",
-                        message_en: "Failed to read file.",
-                        suggestion_ko: "경로 및 파일 권한 확인",
-                        suggestion_en: "Check path and permissions"
-                    )
-                )
-                continue
+            if let fileAnalysis = analyzeFileUsingAST(filePath: filePath, relativePath: relativePath) {
+                fileAnalyses.append(fileAnalysis)
+                totalLineCount += fileAnalysis.lines
+                totalCode += fileAnalysis.codeLines
+                totalComment += fileAnalysis.commentLines
+                totalBlank += fileAnalysis.blankLines
+                totalFunc += fileAnalysis.funcCount
+                warnings.append(contentsOf: fileAnalysis.warnings)
+                smellCount += fileAnalysis.warnings.count
             }
-            let (code, comment, blank) = analyzeLineTypes(content)
-            let (funcCount, avgFuncLen, maxFuncLen, fileWarnings) = analyzeAdvanced(content: content, filePath: relativePath)
-            let lines = content.components(separatedBy: .newlines).count
-            // 품질점수 감점
-            var fileQualityScore = 100.0
-            fileQualityScore -= Double(fileWarnings.count * 2)
-            if lines > 1200 { fileQualityScore -= 5 }
-            if avgFuncLen > 40 { fileQualityScore -= 5 }
-            if fileQualityScore < 0 { fileQualityScore = 0 }
-            smellCount += fileWarnings.count
-            totalQualityScore += fileQualityScore
-            fileAnalyses.append(FileAnalysisResult(
-                id: UUID(),
-                file: relativePath,
-                lines: lines,
-                codeLines: code,
-                commentLines: comment,
-                blankLines: blank,
-                funcCount: funcCount,
-                avgFuncLength: avgFuncLen,
-                longestFunc: maxFuncLen,
-                warnings: fileWarnings
-            ))
-            totalLineCount += lines
-            totalCode += code; totalComment += comment; totalBlank += blank
-            totalFunc += funcCount
-            warnings.append(contentsOf: fileWarnings)
             generateDocs(for: filePath, relativePath: relativePath, outputPath: outputPath)
         }
         let commentRate = totalCode == 0 ? 0 : Double(totalComment) / Double(totalCode) * 100
+        // avgFileQualityScore 계산: fileAnalyses.map { fileQualityScore($0) }의 평균만 사용
+        let avgScore = fileAnalyses.isEmpty ? 0.0 : fileAnalyses.map { fileQualityScore($0) }.reduce(0, +) / Double(fileAnalyses.count)
         let qualityMsg: String = {
-            let score = String(format: "%.1f", totalQualityScore / Double(max(swiftFiles.count, 1)))
+            let score = String(format: "%.1f", min(100.0, avgScore))
             switch DocGenCore.currentLanguage {
             case "en": return "Quality score: \(score)/100"
             case "ko": fallthrough
@@ -319,18 +361,18 @@ class DocGenCore {
             switch DocGenCore.currentLanguage {
             case "en":
                 smellText = label(
-                    "코드스멜/복잡도/보안/컨벤션/미사용 변수/매직넘버/스타일 위반 등 감지 건수: \(smellCount) (Detected: \(smellCount))\n",
-                    "Detected code smell/complexity/security/convention/unreferenced variable/magic number/style violation: \(smellCount)\n"
+                    "감지 건수: \(smellCount) (Detected: \(smellCount))\n",
+                    "Detected code violation: \(smellCount)\n"
                 )
             case "ko": fallthrough
             default:
                 smellText = label(
-                    "코드스멜/복잡도/보안/컨벤션/미사용 변수/매직넘버/스타일 위반 등 감지 건수: \(smellCount) (Detected: \(smellCount))\n",
-                    "Detected code smell/complexity/security/convention/unreferenced variable/magic number/style violation: \(smellCount)\n"
+                    "감지 건수: \(smellCount) (Detected: \(smellCount))\n",
+                    "Detected code violation: \(smellCount)\n"
                 )
             }
             let warningsLabel: String = label("경고:", "Warnings:")
-            var msg = filesText + statText + "\(qualityMsg) / \(commentMsg)\n" + smellText + "\(warningsLabel)\n\(warningText)"
+            let msg = filesText + statText + "\(qualityMsg) / \(commentMsg)\n" + smellText + "\(warningsLabel)\n\(warningText)"
             return wrap(msg)
         }()
         return AnalysisDashboard(
@@ -344,6 +386,16 @@ class DocGenCore {
             warnings: warnings,
             summaryText: resultMsg
         )
+    }
+
+    /// 파일 품질 점수 계산 함수 (경고, 파일 길이, 평균 함수 길이 기반)
+    private static func fileQualityScore(_ analysis: FileAnalysisResult) -> Double {
+        var score = 100.0
+        score -= Double(analysis.warnings.count * 2)
+        if analysis.lines > 1200 { score -= 5 }
+        if analysis.avgFuncLength > 40 { score -= 5 }
+        if score < 0 { score = 0 }
+        return score
     }
 
     // advanced analysis using Warning objects and modularized helpers

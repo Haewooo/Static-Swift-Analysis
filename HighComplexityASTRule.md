@@ -1,11 +1,11 @@
-# ContentView.swift — DocGen/ContentView.swift
+# HighComplexityASTRule.swift — DocGen/HighComplexityASTRule.swift
 
 ---
 
 ## Declarations (1)
 
 swift
-struct ContentView
+struct HighComplexityASTRule
 
 
 ---
