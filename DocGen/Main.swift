@@ -6,19 +6,72 @@
 import Foundation
 
 class DocGenCore {
-    
+    // 앱 전체 언어 설정 (ko, en)
+    static var currentLanguage: String = "ko"
+    // 메시지 요약/줄바꿈: 최대 120자 이내로 줄바꿈
+    static func wrap(_ text: String, limit: Int = 120) -> String {
+        var result = ""
+        var currentLine = ""
+        for word in text.split(separator: " ") {
+            if currentLine.count + word.count + 1 > limit {
+                result += currentLine + "\n"
+                currentLine = String(word)
+            } else {
+                if currentLine.isEmpty {
+                    currentLine = String(word)
+                } else {
+                    currentLine += " " + word
+                }
+            }
+        }
+        if !currentLine.isEmpty { result += currentLine }
+        return result
+    }
     // 파일별 통계 구조체 및 경고 모델
     enum WarningType: String, CaseIterable, Identifiable {
-        case longFunction = "긴 함수"
-        case highComplexity = "높은 복잡도"
-        case unusedVariable = "미사용 변수"
-        case styleViolation = "코드 스타일 위반"
-        case securityIssue = "보안 관련 경고"
-        case duplicateFunctionName = "중복 함수명"
-        case longFile = "긴 파일 (600줄 초과)"
-        case unresolvedTag = "미해결 태그 (TODO, FIXME)"
-        case improperAccessControl = "부적절한 접근 제어"
+        case longFunction
+        case highComplexity
+        case unusedVariable
+        case styleViolation
+        case securityIssue
+        case duplicateFunctionName
+        case longFile
+        case unresolvedTag
+        case improperAccessControl
         var id: String { self.rawValue }
+        var ko: String {
+            switch self {
+            case .longFunction: return "긴 함수"
+            case .highComplexity: return "높은 복잡도"
+            case .unusedVariable: return "미사용 변수"
+            case .styleViolation: return "코드 스타일 위반"
+            case .securityIssue: return "보안 관련 경고"
+            case .duplicateFunctionName: return "중복 함수명"
+            case .longFile: return "긴 파일 (1200줄 초과)"
+            case .unresolvedTag: return "미해결 태그 (TODO, FIXME)"
+            case .improperAccessControl: return "부적절한 접근 제어"
+            }
+        }
+        var en: String {
+            switch self {
+            case .longFunction: return "Long function"
+            case .highComplexity: return "High complexity"
+            case .unusedVariable: return "Unused variable"
+            case .styleViolation: return "Style violation"
+            case .securityIssue: return "Security warning"
+            case .duplicateFunctionName: return "Duplicate function name"
+            case .longFile: return "Long file (over 1200 lines)"
+            case .unresolvedTag: return "Unresolved tag (TODO, FIXME)"
+            case .improperAccessControl: return "Improper access control"
+            }
+        }
+        var display: String {
+            switch DocGenCore.currentLanguage {
+            case "en": return en
+            case "ko": fallthrough
+            default: return "\(ko) (\(en))"
+            }
+        }
     }
 
     enum Severity: Int, Comparable {
@@ -29,12 +82,24 @@ class DocGenCore {
         case critical = 4
         static func < (lhs: Severity, rhs: Severity) -> Bool { lhs.rawValue < rhs.rawValue }
         var displayName: String {
-            switch self {
-            case .info: return "정보"
-            case .low: return "낮음"
-            case .medium: return "중간"
-            case .high: return "높음"
-            case .critical: return "심각"
+            switch DocGenCore.currentLanguage {
+            case "en":
+                switch self {
+                case .info: return "Info"
+                case .low: return "Low"
+                case .medium: return "Medium"
+                case .high: return "High"
+                case .critical: return "Critical"
+                }
+            case "ko": fallthrough
+            default:
+                switch self {
+                case .info: return "정보 (Info)"
+                case .low: return "낮음 (Low)"
+                case .medium: return "중간 (Medium)"
+                case .high: return "높음 (High)"
+                case .critical: return "심각 (Critical)"
+                }
             }
         }
     }
@@ -45,10 +110,47 @@ class DocGenCore {
         let line: Int?
         let type: WarningType
         let severity: Severity
-        let message: String
-        let suggestion: String?
+        let message_ko: String
+        let message_en: String
+        let suggestion_ko: String?
+        let suggestion_en: String?
+        var message: String {
+            switch DocGenCore.currentLanguage {
+            case "en": return message_en
+            case "ko": fallthrough
+            default: return "\(message_ko) (\(message_en))"
+            }
+        }
+        var suggestion: String? {
+            switch DocGenCore.currentLanguage {
+            case "en": return suggestion_en
+            case "ko": fallthrough
+            default:
+                if let ko = suggestion_ko, let en = suggestion_en {
+                    return "\(ko) (\(en))"
+                } else if let ko = suggestion_ko {
+                    return ko
+                } else if let en = suggestion_en {
+                    return en
+                } else {
+                    return nil
+                }
+            }
+        }
         static func == (lhs: Warning, rhs: Warning) -> Bool {
             lhs.id == rhs.id
+        }
+        // 생성자 보조
+        init(id: UUID, filePath: String, line: Int?, type: WarningType, severity: Severity, message_ko: String, message_en: String, suggestion_ko: String? = nil, suggestion_en: String? = nil) {
+            self.id = id
+            self.filePath = filePath
+            self.line = line
+            self.type = type
+            self.severity = severity
+            self.message_ko = message_ko
+            self.message_en = message_en
+            self.suggestion_ko = suggestion_ko
+            self.suggestion_en = suggestion_en
         }
     }
 
@@ -90,24 +192,35 @@ class DocGenCore {
         var warnings: [Warning] = []
         var totalQualityScore = 100.0
         var smellCount = 0
-
         for filePath in swiftFiles {
-            guard let content = try? String(contentsOfFile: filePath, encoding: .utf8) else { continue }
             let relativePath = filePath.replacingOccurrences(of: rootPath + "/", with: "")
+            guard let content = try? String(contentsOfFile: filePath, encoding: .utf8) else {
+                warnings.append(
+                    Warning(
+                        id: UUID(),
+                        filePath: relativePath,
+                        line: nil,
+                        type: .securityIssue,
+                        severity: .high,
+                        message_ko: "파일을 읽을 수 없습니다.",
+                        message_en: "Failed to read file.",
+                        suggestion_ko: "경로 및 파일 권한 확인",
+                        suggestion_en: "Check path and permissions"
+                    )
+                )
+                continue
+            }
             let (code, comment, blank) = analyzeLineTypes(content)
             let (funcCount, avgFuncLen, maxFuncLen, fileWarnings) = analyzeAdvanced(content: content, filePath: relativePath)
             let lines = content.components(separatedBy: .newlines).count
-
             // 품질점수 감점
             var fileQualityScore = 100.0
             fileQualityScore -= Double(fileWarnings.count * 2)
-            if lines > 600 { fileQualityScore -= 5 }
+            if lines > 1200 { fileQualityScore -= 5 }
             if avgFuncLen > 40 { fileQualityScore -= 5 }
             if fileQualityScore < 0 { fileQualityScore = 0 }
-
             smellCount += fileWarnings.count
             totalQualityScore += fileQualityScore
-
             fileAnalyses.append(FileAnalysisResult(
                 id: UUID(),
                 file: relativePath,
@@ -126,11 +239,31 @@ class DocGenCore {
             warnings.append(contentsOf: fileWarnings)
             generateDocs(for: filePath, relativePath: relativePath, outputPath: outputPath)
         }
-
         let commentRate = totalCode == 0 ? 0 : Double(totalComment) / Double(totalCode) * 100
-        let qualityMsg = "품질점수: \(String(format:"%.1f",totalQualityScore/Double(max(swiftFiles.count,1))))/100"
-        let commentMsg = commentRate < 7 ? "주석률 낮음(\(String(format: "%.1f", commentRate))%)" : "주석 적정(\(String(format: "%.1f", commentRate))%)"
-
+        let qualityMsg: String = {
+            let score = String(format: "%.1f", totalQualityScore / Double(max(swiftFiles.count, 1)))
+            switch DocGenCore.currentLanguage {
+            case "en": return "Quality score: \(score)/100"
+            case "ko": fallthrough
+            default: return "품질점수: \(score)/100 (Quality score: \(score)/100)"
+            }
+        }()
+        let commentMsg: String = {
+            let rateStr = String(format: "%.1f", commentRate)
+            if commentRate < 7 {
+                switch DocGenCore.currentLanguage {
+                case "en": return "Low comment rate (\(rateStr)%)"
+                case "ko": fallthrough
+                default: return "주석률 낮음(\(rateStr)%) (Low comment rate (\(rateStr)%))"
+                }
+            } else {
+                switch DocGenCore.currentLanguage {
+                case "en": return "Adequate comment rate (\(rateStr)%)"
+                case "ko": fallthrough
+                default: return "주석 적정(\(rateStr)%) (Adequate comment rate (\(rateStr)%))"
+                }
+            }
+        }()
         generateSummaryIndex(
             from: fileAnalyses.map { ($0.file, [], [], []) },
             outputPath: outputPath,
@@ -140,22 +273,66 @@ class DocGenCore {
             commentMsg: commentMsg,
             qualityMsg: qualityMsg
         )
-
-        let warningText = warnings.isEmpty ? "특이 경고 없음." : warnings.map { w in
-            let linePart = w.line != nil ? " (line \(w.line!))" : ""
-            return "(\(w.filePath))\(linePart): [\(w.type.rawValue)] \(w.message)"
-        }.joined(separator: "\n")
-        let resultMsg = """
-        완료: \(swiftFiles.count)개 파일 분석됨.
-        전체 줄수: \(totalLineCount) / 코드: \(totalCode) / 주석: \(totalComment) / 공백: \(totalBlank)
-        함수: \(totalFunc), 평균 함수길이: \((totalFunc>0) ? String(format: "%.1f",Double(totalCode)/Double(totalFunc)) : "0")
-        주석률: \(String(format: "%.1f", commentRate))%
-        \(qualityMsg) / \(commentMsg)
-        코드스멜/복잡도/보안/컨벤션/미사용 변수/매직넘버/스타일 위반 등 감지 건수: \(smellCount)
-        경고:
-        \(warningText)
-        """
-
+        let warningText: String
+        if warnings.isEmpty {
+            switch DocGenCore.currentLanguage {
+            case "en": warningText = "No notable warnings."
+            case "ko": fallthrough
+            default: warningText = "특이 경고 없음. (No notable warnings.)"
+            }
+        } else {
+            warningText = warnings.map { w in
+                let linePart = w.line != nil ? " (line \(w.line ?? 0))" : ""
+                return "(\(w.filePath))\(linePart): [\(w.type.display)] \(wrap(w.message))"
+            }.joined(separator: "\n")
+        }
+        let resultMsg: String = {
+            // 현지화 함수
+            func label(_ ko: String, _ en: String) -> String {
+                return DocGenCore.currentLanguage == "en" ? en : "\(ko) (\(en))"
+            }
+            let filesText: String
+            switch DocGenCore.currentLanguage {
+            case "en":
+                filesText = label("완료: \(swiftFiles.count)개 파일 분석됨.", "Completed: \(swiftFiles.count) files analyzed.") + "\n"
+            case "ko": fallthrough
+            default:
+                filesText = label("완료: \(swiftFiles.count)개 파일 분석됨.", "Completed: \(swiftFiles.count) files analyzed.") + "\n"
+            }
+            let avgFuncLengthStr = totalFunc > 0 ? String(format: "%.1f", Double(totalCode) / Double(totalFunc)) : "0"
+            let commentRateStr = String(format: "%.1f", commentRate)
+            let statText: String
+            switch DocGenCore.currentLanguage {
+            case "en":
+                statText = label(
+                    "전체 줄수: \(totalLineCount) / 코드: \(totalCode) / 주석: \(totalComment) / 공백: \(totalBlank)\n함수: \(totalFunc), 평균 함수길이: \(avgFuncLengthStr)\n주석률: \(commentRateStr)% (Comment rate: \(commentRateStr)%)\n",
+                    "Total lines: \(totalLineCount) / Code: \(totalCode) / Comments: \(totalComment) / Blank: \(totalBlank)\nFunctions: \(totalFunc), Avg. function length: \(avgFuncLengthStr)\nComment rate: \(commentRateStr)%\n"
+                )
+            case "ko": fallthrough
+            default:
+                statText = label(
+                    "전체 줄수: \(totalLineCount) / 코드: \(totalCode) / 주석: \(totalComment) / 공백: \(totalBlank)\n함수: \(totalFunc), 평균 함수길이: \(avgFuncLengthStr)\n주석률: \(commentRateStr)% (Comment rate: \(commentRateStr)%)\n",
+                    "Total lines: \(totalLineCount) / Code: \(totalCode) / Comments: \(totalComment) / Blank: \(totalBlank)\nFunctions: \(totalFunc), Avg. function length: \(avgFuncLengthStr)\nComment rate: \(commentRateStr)%\n"
+                )
+            }
+            let smellText: String
+            switch DocGenCore.currentLanguage {
+            case "en":
+                smellText = label(
+                    "코드스멜/복잡도/보안/컨벤션/미사용 변수/매직넘버/스타일 위반 등 감지 건수: \(smellCount) (Detected: \(smellCount))\n",
+                    "Detected code smell/complexity/security/convention/unreferenced variable/magic number/style violation: \(smellCount)\n"
+                )
+            case "ko": fallthrough
+            default:
+                smellText = label(
+                    "코드스멜/복잡도/보안/컨벤션/미사용 변수/매직넘버/스타일 위반 등 감지 건수: \(smellCount) (Detected: \(smellCount))\n",
+                    "Detected code smell/complexity/security/convention/unreferenced variable/magic number/style violation: \(smellCount)\n"
+                )
+            }
+            let warningsLabel: String = label("경고:", "Warnings:")
+            var msg = filesText + statText + "\(qualityMsg) / \(commentMsg)\n" + smellText + "\(warningsLabel)\n\(warningText)"
+            return wrap(msg)
+        }()
         return AnalysisDashboard(
             analyses: fileAnalyses,
             totalLines: totalLineCount,
@@ -218,10 +395,22 @@ class DocGenCore {
                 if insideFunc, let fName = currentFuncName {
                     funcLens.append(currentFuncLen)
                     if currentCyclomatic > 12 {
-                        warnings.append(Warning(id: UUID(), filePath: filePath, line: currentFuncStartLine, type: .highComplexity, severity: .high, message: "함수 '\(fName)'의 Cyclomatic Complexity가 \(currentCyclomatic)으로 높습니다 (12 이하 권장).", suggestion: "함수를 더 작은 단위로 분리하거나 로직을 단순화하세요."))
+                        warnings.append(Warning(
+                            id: UUID(), filePath: filePath, line: currentFuncStartLine, type: .highComplexity, severity: .high,
+                            message_ko: "함수 '\(fName)'의 Cyclomatic Complexity가 \(currentCyclomatic)으로 높습니다 (12 이하 권장).",
+                            message_en: "Function '\(fName)' has high cyclomatic complexity (\(currentCyclomatic)) (recommended ≤12).",
+                            suggestion_ko: "함수를 더 작은 단위로 분리하거나 로직을 단순화하세요.",
+                            suggestion_en: "Split into smaller functions or simplify logic."
+                        ))
                     }
                     for v in localVars where !usedVars.contains(v) {
-                        warnings.append(Warning(id: UUID(), filePath: filePath, line: currentFuncStartLine, type: .unusedVariable, severity: .low, message: "함수 '\(fName)' 내 지역 변수/상수 '\(v)'가 사용되지 않았습니다.", suggestion: "불필요하면 제거하세요."))
+                        warnings.append(Warning(
+                            id: UUID(), filePath: filePath, line: currentFuncStartLine, type: .unusedVariable, severity: .low,
+                            message_ko: "함수 '\(fName)' 내 지역 변수/상수 '\(v)'가 사용되지 않았습니다.",
+                            message_en: "Unused local variable/constant '\(v)' in function '\(fName)'.",
+                            suggestion_ko: "불필요하면 제거하세요.",
+                            suggestion_en: "Remove if unnecessary."
+                        ))
                     }
                     allLocalVariablesInFunctions[fName] = (localVars, usedVars)
                 }
@@ -247,10 +436,22 @@ class DocGenCore {
                     if let fName = currentFuncName {
                         funcLens.append(currentFuncLen)
                         if currentCyclomatic > 12 {
-                            warnings.append(Warning(id: UUID(), filePath: filePath, line: currentFuncStartLine, type: .highComplexity, severity: .high, message: "함수 '\(fName)'의 Cyclomatic Complexity가 \(currentCyclomatic)으로 높습니다 (12 이하 권장).", suggestion: "함수를 더 작은 단위로 분리하거나 로직을 단순화하세요."))
+                        warnings.append(Warning(
+                            id: UUID(), filePath: filePath, line: currentFuncStartLine, type: .highComplexity, severity: .high,
+                            message_ko: "함수 '\(fName)'의 Cyclomatic Complexity가 \(currentCyclomatic)으로 높습니다 (12 이하 권장).",
+                            message_en: "Function '\(fName)' has high cyclomatic complexity (\(currentCyclomatic)) (recommended ≤12).",
+                            suggestion_ko: "함수를 더 작은 단위로 분리하거나 로직을 단순화하세요.",
+                            suggestion_en: "Split into smaller functions or simplify logic."
+                        ))
                         }
                         for v in localVars where !usedVars.contains(v) {
-                            warnings.append(Warning(id: UUID(), filePath: filePath, line: currentFuncStartLine, type: .unusedVariable, severity: .low, message: "함수 '\(fName)' 내 지역 변수/상수 '\(v)'가 사용되지 않았습니다.", suggestion: "불필요하면 제거하세요."))
+                            warnings.append(Warning(
+                                id: UUID(), filePath: filePath, line: currentFuncStartLine, type: .unusedVariable, severity: .low,
+                                message_ko: "함수 '\(fName)' 내 지역 변수/상수 '\(v)'가 사용되지 않았습니다.",
+                                message_en: "Unused local variable/constant '\(v)' in function '\(fName)'.",
+                                suggestion_ko: "불필요하면 제거하세요.",
+                                suggestion_en: "Remove if unnecessary."
+                            ))
                         }
                         allLocalVariablesInFunctions[fName] = (localVars, usedVars)
                     }
@@ -278,18 +479,58 @@ class DocGenCore {
         if insideFunc, let fName = currentFuncName {
             funcLens.append(currentFuncLen)
             if currentCyclomatic > 12 {
-                warnings.append(Warning(id: UUID(), filePath: filePath, line: currentFuncStartLine, type: .highComplexity, severity: .high, message: "함수 '\(fName)'의 Cyclomatic Complexity가 \(currentCyclomatic)으로 높습니다 (12 이하 권장).", suggestion: "함수를 더 작은 단위로 분리하거나 로직을 단순화하세요."))
+                warnings.append(Warning(
+                    id: UUID(),
+                    filePath: filePath,
+                    line: currentFuncStartLine,
+                    type: .highComplexity,
+                    severity: .high,
+                    message_ko: "함수 '\(fName)'의 Cyclomatic Complexity가 \(currentCyclomatic)으로 높습니다 (12 이하 권장).",
+                    message_en: "Function '\(fName)' has high cyclomatic complexity (\(currentCyclomatic)) (recommended ≤12).",
+                    suggestion_ko: "함수를 더 작은 단위로 분리하거나 로직을 단순화하세요.",
+                    suggestion_en: "Split into smaller functions or simplify logic."
+                ))
             }
             for v in localVars where !usedVars.contains(v) {
-                warnings.append(Warning(id: UUID(), filePath: filePath, line: currentFuncStartLine, type: .unusedVariable, severity: .low, message: "함수 '\(fName)' 내 지역 변수/상수 '\(v)'가 사용되지 않았습니다.", suggestion: "불필요하면 제거하세요."))
+                warnings.append(Warning(
+                    id: UUID(),
+                    filePath: filePath,
+                    line: currentFuncStartLine,
+                    type: .unusedVariable,
+                    severity: .low,
+                    message_ko: "함수 '\(fName)' 내 지역 변수/상수 '\(v)'가 사용되지 않았습니다.",
+                    message_en: "Unused local variable/constant '\(v)' in function '\(fName)'.",
+                    suggestion_ko: "불필요하면 제거하세요.",
+                    suggestion_en: "Remove if unnecessary."
+                ))
             }
             allLocalVariablesInFunctions[fName] = (localVars, usedVars)
         }
         for (idx, lenInfo) in funcLens.enumerated() where lenInfo > 50 {
-            warnings.append(Warning(id: UUID(), filePath: filePath, line: nil, type: .longFunction, severity: .medium, message: "함수 (순서: \(idx+1))의 길이가 \(lenInfo)줄로 너무 깁니다 (50줄 이하 권장).", suggestion: "함수를 더 작은 단위로 분리하는 것을 고려하세요."))
+            warnings.append(Warning(
+                id: UUID(),
+                filePath: filePath,
+                line: nil,
+                type: .longFunction,
+                severity: .medium,
+                message_ko: "함수 (순서: \(idx+1))의 길이가 \(lenInfo)줄로 너무 깁니다 (50줄 이하 권장).",
+                message_en: "Function (index: \(idx+1)) is too long (\(lenInfo) lines, recommended ≤50).",
+                suggestion_ko: "함수를 더 작은 단위로 분리하는 것을 고려하세요.",
+                suggestion_en: "Consider splitting into smaller functions."
+            ))
         }
         for (name, count) in funcNameCounts where count > 1 {
-            warnings.append(Warning(id: UUID(), filePath: filePath, line: funcNameToLine[name], type: .duplicateFunctionName, severity: .medium, message: "함수명 '\(name)'이(가) 파일 내에서 \(count)번 중복 정의되었습니다.", suggestion: "함수명을 다르게 하거나, 오버로딩이 올바르게 되었는지 확인하세요."))
+            warnings.append(Warning(
+                id: UUID(),
+                filePath: filePath,
+                line: funcNameToLine[name],
+                type: .duplicateFunctionName,
+                severity: .medium,
+                message_ko: "함수명 '\(name)'이(가) 파일 내에서 \(count)번 중복 정의되었습니다.",
+                message_en: "Function name '\(name)' is duplicated \(count) times in the file.",
+                suggestion_ko: "함수명을 다르게 하거나, 오버로딩이 올바르게 되었는지 확인하세요.",
+                suggestion_en: "Rename the function or verify correct overloading."
+            ))
         }
         let maxLen = funcLens.max() ?? 0
         let avgLen = funcLens.isEmpty ? 0.0 : Double(funcLens.reduce(0, +)) / Double(funcLens.count)
@@ -370,8 +611,10 @@ class DocGenCore {
                     line: declLine,
                     type: .unusedVariable,
                     severity: .low,
-                    message: "파일 레벨 변수/상수 '\(varName)'가 사용되지 않았습니다.",
-                    suggestion: "불필요하다면 삭제하세요."
+                    message_ko: "파일 레벨 변수/상수 '\(varName)'가 사용되지 않았습니다.",
+                    message_en: "Unused file-level variable/constant '\(varName)'.",
+                    suggestion_ko: "불필요하다면 삭제하세요.",
+                    suggestion_en: "Delete if unnecessary."
                 ))
             }
         }
@@ -385,34 +628,85 @@ class DocGenCore {
             let trimmed = line.trimmingCharacters(in: .whitespaces)
             // 불필요한 공백
             if trimmed.hasSuffix("  ") {
-                warnings.append(Warning(id: UUID(), filePath: filePath, line: idx+1, type: .styleViolation, severity: .low, message: "불필요한 공백이 포함됨: '\(trimmed)'", suggestion: nil))
+                warnings.append(Warning(
+                    id: UUID(),
+                    filePath: filePath,
+                    line: idx+1,
+                    type: .styleViolation,
+                    severity: .low,
+                    message_ko: "불필요한 공백이 포함됨: '\(trimmed)'",
+                    message_en: "Unnecessary whitespace: '\(trimmed)'",
+                    suggestion_ko: "여분의 공백을 제거하세요.",
+                    suggestion_en: "Remove unnecessary whitespace."
+                ))
             }
             // 중복 공백
             if trimmed.contains("var  ") {
-                warnings.append(Warning(id: UUID(), filePath: filePath, line: idx+1, type: .styleViolation, severity: .low, message: "중복 공백이 포함됨: '\(trimmed)'", suggestion: nil))
+                warnings.append(Warning(
+                    id: UUID(),
+                    filePath: filePath,
+                    line: idx+1,
+                    type: .styleViolation,
+                    severity: .low,
+                    message_ko: "중복 공백이 포함됨: '\(trimmed)'",
+                    message_en: "Duplicated whitespace: '\(trimmed)'",
+                    suggestion_ko: "중복된 공백을 하나로 줄이세요.",
+                    suggestion_en: "Reduce duplicated whitespace to a single space."
+                ))
             }
             // 클래스명/상속 누락
             if trimmed.contains("class ") && !trimmed.contains(":") {
-                warnings.append(Warning(id: UUID(), filePath: filePath, line: idx+1, type: .styleViolation, severity: .low, message: "클래스 선언에 상속/프로토콜 누락 가능성: '\(trimmed)'", suggestion: "상속 또는 프로토콜 채택 여부 확인"))
+                warnings.append(Warning(id: UUID(), filePath: filePath, line: idx+1, type: .styleViolation, severity: .low,
+                    message_ko: "클래스 선언에 상속/프로토콜 누락 가능성: '\(trimmed)'",
+                    message_en: "Possible missing inheritance/protocol in class declaration: '\(trimmed)'",
+                    suggestion_ko: "상속 또는 프로토콜 채택 여부 확인",
+                    suggestion_en: "Check inheritance or protocol adoption"
+                ))
             }
             // 타입 네이밍 규칙(UpperCamel)
             if let m = trimmed.range(of: #"^(class|struct|enum)\s+([A-Za-z_][A-Za-z0-9_]*)"#, options: .regularExpression) {
                 let name = String(trimmed[m].split(separator: " ")[1])
                 if name.prefix(1).lowercased() == name.prefix(1) {
-                    warnings.append(Warning(id: UUID(), filePath: filePath, line: idx+1, type: .styleViolation, severity: .low, message: "타입명 네이밍 규칙 위반: \(name)", suggestion: "UpperCamelCase 사용 권장"))
+                    warnings.append(Warning(
+                        id: UUID(),
+                        filePath: filePath,
+                        line: idx+1,
+                        type: .styleViolation,
+                        severity: .low,
+                        message_ko: "타입명 네이밍 규칙 위반: \(name)",
+                        message_en: "Type name does not follow UpperCamelCase: \(name)",
+                        suggestion_ko: "UpperCamelCase 사용 권장",
+                        suggestion_en: "Use UpperCamelCase"
+                    ))
                 }
             }
             // 함수명 네이밍 규칙
             if let funcRange = trimmed.range(of: #"func\s+([A-Za-z_][A-Za-z0-9_]*)"#, options: .regularExpression) {
                 let fname = String(trimmed[funcRange].split(separator: " ")[1].split(separator:"(")[0])
                 if fname.contains("_") {
-                    warnings.append(Warning(id: UUID(), filePath: filePath, line: idx+1, type: .styleViolation, severity: .low, message: "함수명 네이밍 규칙 위반: \(fname)", suggestion: "camelCase 사용 권장"))
+                    warnings.append(Warning(
+                        id: UUID(),
+                        filePath: filePath,
+                        line: idx+1,
+                        type: .styleViolation,
+                        severity: .low,
+                        message_ko: "함수명 네이밍 규칙 위반: \(fname)",
+                        message_en: "Function name does not follow camelCase: \(fname)",
+                        suggestion_ko: "camelCase 사용 권장",
+                        suggestion_en: "Use camelCase"
+                    ))
                 }
             }
         }
-        // 긴 파일 경고
-        if lines.count > 600 {
-            warnings.append(Warning(id: UUID(), filePath: filePath, line: nil, type: .longFile, severity: .medium, message: "파일이 너무 깁니다 (\(lines.count)줄, 600줄 초과)", suggestion: "파일을 분할하는 것을 고려하세요."))
+        // 긴 파일 경고 (1200줄 초과)
+        if lines.count > 1200 {
+            warnings.append(Warning(
+                id: UUID(), filePath: filePath, line: nil, type: .longFile, severity: .medium,
+                message_ko: "파일이 너무 깁니다 (\(lines.count)줄, 1200줄 초과)",
+                message_en: "File is too long (\(lines.count) lines, over 1200 lines)",
+                suggestion_ko: "파일을 분할하는 것을 고려하세요.",
+                suggestion_en: "Consider splitting the file."
+            ))
         }
         return warnings
     }
@@ -423,10 +717,20 @@ class DocGenCore {
         for (idx, line) in lines.enumerated() {
             let trimmed = line.trimmingCharacters(in: .whitespaces)
             if trimmed.contains("password") || trimmed.contains("key") || trimmed.contains("secret") {
-                warnings.append(Warning(id: UUID(), filePath: filePath, line: idx+1, type: .securityIssue, severity: .high, message: "보안 관련 키워드 노출 감지: '\(trimmed)'", suggestion: "민감정보 노출 주의"))
+                warnings.append(Warning(id: UUID(), filePath: filePath, line: idx+1, type: .securityIssue, severity: .high,
+                    message_ko: "보안 관련 키워드 노출 감지: '\(trimmed)'",
+                    message_en: "Security sensitive keyword detected: '\(trimmed)'",
+                    suggestion_ko: "민감정보 노출 주의",
+                    suggestion_en: "Beware of sensitive information exposure"
+                ))
             }
             if trimmed.contains("public ") && trimmed.contains("var ") && !trimmed.contains("{ get") {
-                warnings.append(Warning(id: UUID(), filePath: filePath, line: idx+1, type: .improperAccessControl, severity: .medium, message: "public var의 과도 노출 가능성: '\(trimmed)'", suggestion: "접근제어자를 검토하세요."))
+                warnings.append(Warning(id: UUID(), filePath: filePath, line: idx+1, type: .improperAccessControl, severity: .medium,
+                    message_ko: "public var의 과도 노출 가능성: '\(trimmed)'",
+                    message_en: "Potential overexposure of public var: '\(trimmed)'",
+                    suggestion_ko: "접근제어자를 검토하세요.",
+                    suggestion_en: "Review access control modifiers"
+                ))
             }
         }
         return warnings
@@ -438,7 +742,12 @@ class DocGenCore {
         for (idx, line) in lines.enumerated() {
             let trimmed = line.trimmingCharacters(in: .whitespaces)
             if trimmed.contains("FIXME") || trimmed.contains("TODO") {
-                warnings.append(Warning(id: UUID(), filePath: filePath, line: idx+1, type: .unresolvedTag, severity: .info, message: "미해결 태그 발견: '\(trimmed)'", suggestion: "작업이 끝났으면 태그를 제거하세요."))
+                warnings.append(Warning(id: UUID(), filePath: filePath, line: idx+1, type: .unresolvedTag, severity: .info,
+                    message_ko: "미해결 태그 발견: '\(trimmed)'",
+                    message_en: "Unresolved tag found: '\(trimmed)'",
+                    suggestion_ko: "작업이 끝났으면 태그를 제거하세요.",
+                    suggestion_en: "Remove the tag after completion"
+                ))
             }
         }
         return warnings
@@ -532,49 +841,52 @@ class DocGenCore {
         guard let content = try? String(contentsOfFile: filePath, encoding: .utf8) else {
             return
         }
-
         let declarations = parseDeclarations(from: content)
         let (methods, topLevelFlow) = parsePublicMethods(from: content)
         let fileName = (relativePath as NSString).lastPathComponent
-
+        let lang = DocGenCore.currentLanguage
+        func label(_ ko: String, _ en: String) -> String {
+            switch lang {
+            case "en": return en
+            case "ko": fallthrough
+            default: return "\(ko) (\(en))"
+            }
+        }
         var doc = "# \(fileName) — \(relativePath)\n\n"
         doc += "---\n\n"
-        doc += "## Declarations (\(declarations.count))\n\n"
+        doc += "## \(label("선언부", "Declarations")) (\(declarations.count))\n\n"
         if declarations.isEmpty {
-            doc += "_No declarations found._\n\n"
+            doc += "_\(label("선언 없음", "No declarations found"))_\n\n"
         } else {
             doc += "swift\n"
             declarations.forEach { doc += "\($0)\n" }
             doc += "\n\n"
         }
         doc += "---\n\n"
-        doc += "## Public Methods (\(methods.count))\n\n"
+        doc += "## \(label("공개 메서드", "Public Methods")) (\(methods.count))\n\n"
         if methods.isEmpty {
-            doc += "_No public methods found._\n\n"
+            doc += "_\(label("공개 메서드 없음", "No public methods found"))_\n\n"
         } else {
             doc += "swift\n"
             methods.forEach { doc += "func \($0)\n" }
             doc += "\n\n"
         }
         doc += "---\n\n"
-        doc += "## Top-Level Flow Candidates (\(topLevelFlow.count))\n\n"
+        doc += "## \(label("최상위 흐름 후보", "Top-Level Flow Candidates")) (\(topLevelFlow.count))\n\n"
         if topLevelFlow.isEmpty {
-            doc += "_No top-level orchestrators found._\n\n"
+            doc += "_\(label("최상위 orchestrator 없음", "No top-level orchestrators found"))_\n\n"
         } else {
             doc += "swift\n"
             topLevelFlow.forEach { doc += "func \($0)\n" }
             doc += "\n\n"
         }
-
         let outputFilePath = (outputPath as NSString).appendingPathComponent((relativePath as NSString).deletingPathExtension + ".md")
         let outputDir = (outputFilePath as NSString).deletingLastPathComponent
-
         do {
             try FileManager.default.createDirectory(atPath: outputDir, withIntermediateDirectories: true, attributes: nil)
         } catch {
             return
         }
-
         do {
             try doc.write(toFile: outputFilePath, atomically: true, encoding: .utf8)
         } catch {
@@ -591,20 +903,31 @@ class DocGenCore {
         commentMsg: String,
         qualityMsg: String
     ) {
+        let lang = DocGenCore.currentLanguage
+        func label(_ ko: String, _ en: String) -> String {
+            switch lang {
+            case "en": return en
+            case "ko": fallthrough
+            default: return "\(ko) (\(en))"
+            }
+        }
         var index = "# SSC Documentation Index\n\n"
-        index += "## 전체 통계\n"
-        index += "- 전체 파일: \(fileAnalyses.count)\n- 전체 줄수: \(totalLineCount)\n- 전체 함수: \(totalFunc)\n"
-        index += "- 품질 진단: \(qualityMsg), \(commentMsg)\n\n"
-        index += "## 파일별 상세\n"
+        index += "## \(label("전체 통계", "Summary"))\n"
+        index += "- \(label("전체 파일", "Total files")): \(fileAnalyses.count)\n"
+        index += "- \(label("전체 줄수", "Total lines")): \(totalLineCount)\n"
+        index += "- \(label("전체 함수", "Total functions")): \(totalFunc)\n"
+        index += "- \(label("품질 진단", "Quality diagnosis")): \(qualityMsg), \(commentMsg)\n\n"
+        index += "## \(label("파일별 상세", "Per-file details"))\n"
         for f in fileAnalyses {
-            index += "### \(f.file)\n- 줄수: \(f.lines), 코드: \(f.codeLines), 주석: \(f.commentLines), 공백: \(f.blankLines)\n"
-            index += "- 함수: \(f.funcCount), 평균 함수길이: \(String(format: "%.1f", f.avgFuncLength)), 가장 긴 함수: \(f.longestFunc)\n"
+            index += "### \(f.file)\n"
+            index += "- \(label("줄수", "Lines")): \(f.lines), \(label("코드", "Code")): \(f.codeLines), \(label("주석", "Comments")): \(f.commentLines), \(label("공백", "Blank")): \(f.blankLines)\n"
+            index += "- \(label("함수", "Functions")): \(f.funcCount), \(label("평균 함수길이", "Avg. function length")): \(String(format: "%.1f", f.avgFuncLength)), \(label("가장 긴 함수", "Longest function")): \(f.longestFunc)\n"
             if !f.warnings.isEmpty {
                 let detailedWarningsText = f.warnings.map { warning -> String in
-                    let lineInfo = warning.line.map { " (L\($0))" } ?? "" // 라인 정보가 있으면 " (L라인번호)" 형태로, 없으면 빈 문자열
-                    return "[\(warning.severity.displayName)/\(warning.type.rawValue)] \(warning.message)\(lineInfo)"
+                    let lineInfo = warning.line != nil ? " (L\(warning.line ?? 0))" : ""
+                    return "[\(warning.severity.displayName)/\(warning.type.display)] \(DocGenCore.wrap(warning.message))\(lineInfo)"
                 }.joined(separator: " | ")
-                index += "- 상세 경고: \(detailedWarningsText)\n"
+                index += "- \(label("상세 경고", "Detailed Warnings")): \(detailedWarningsText)\n"
             }
             index += "\n"
         }
@@ -612,3 +935,4 @@ class DocGenCore {
         do { try index.write(toFile: indexPath, atomically: true, encoding: .utf8) } catch {}
     }
 }
+

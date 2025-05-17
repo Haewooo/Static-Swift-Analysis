@@ -11,9 +11,11 @@ import AppKit
 #endif
 
 struct ContentView: View {
+    // 언어 목록 및 선택 상태
+    @AppStorage("AppLanguage") private var appLanguage: String = "ko"
     @State private var rootPath: String = ""
     @State private var outputPath: String = ""
-    @State private var status: String = "시작할 준비가 되었습니다."
+    @State private var status: String = DocGenCore.currentLanguage == "en" ? "Ready to start analysis." : "시작할 준비가 되었습니다."
     @State private var isProcessing: Bool = false
     @State private var logMessages: [String] = []
     @State private var showAlert: Bool = false
@@ -35,6 +37,16 @@ struct ContentView: View {
     @State private var sortKey: String = "품질점수"
     @State private var sortDesc: Bool = true
     @State private var selectedFileID: DocGenCore.FileAnalysisResult.ID? = nil
+    
+    // 한/영 텍스트 전환 헬퍼
+    private func label(_ ko: String, _ en: String) -> String {
+        let lang = DocGenCore.currentLanguage.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if lang.hasPrefix("en") {
+            return en
+        } else {
+            return ko
+        }
+    }
 
     var selectedFile: DocGenCore.FileAnalysisResult? {
         guard let selectedID = selectedFileID else { return nil }
@@ -131,34 +143,34 @@ struct ContentView: View {
     }
 
     private var pathInputGroup: some View {
-        GroupBox(label: Label("문서화 범위 및 출력", systemImage: "folder")) {
+        GroupBox(label: Label(label("분석 범위 및 출력", "Analysis Range & Output"), systemImage: "folder")) {
             VStack(spacing: 10) {
                 HStack(spacing: 8) {
-                    Text("Root Path:").frame(width: 82, alignment: .leading)
-                    TextField("예: /Users/yourname/Project", text: $rootPath)
+                    Text(label("루트 경로:", "Root Path:")).frame(width: 82, alignment: .leading)
+                    TextField(label("예: /Users/yourname/Project", "e.g. /Users/yourname/Project"), text: $rootPath)
                         .textFieldStyle(RoundedBorderTextFieldStyle())
                         .contextMenu {
                             ForEach(recentRootPaths, id: \.self) { path in
                                 Button(path) { rootPath = path }
                             }
                         }
-                    Button("찾기") { selectPath(isDirectory: true) { selected in rootPath = selected } }
+                    Button(label("찾기", "Browse")) { selectPath(isDirectory: true) { selected in rootPath = selected } }
                     Button(action: { copyToClipboard(rootPath) }) {
-                        Image(systemName: "doc.on.doc").help("경로 복사")
+                        Image(systemName: "doc.on.doc").help(label("경로 복사", "Copy Path"))
                     }
                 }
                 HStack(spacing: 8) {
-                    Text("Output Path:").frame(width: 82, alignment: .leading)
-                    TextField("예: /Users/yourname/Docs", text: $outputPath)
+                    Text(label("출력 경로:", "Output Path:")).frame(width: 82, alignment: .leading)
+                    TextField(label("예: /Users/yourname/Docs", "e.g. /Users/yourname/Docs"), text: $outputPath)
                         .textFieldStyle(RoundedBorderTextFieldStyle())
                         .contextMenu {
                             ForEach(recentOutputPaths, id: \.self) { path in
                                 Button(path) { outputPath = path }
                             }
                         }
-                    Button("찾기") { selectPath(isDirectory: true) { selected in outputPath = selected } }
+                    Button(label("찾기", "Browse")) { selectPath(isDirectory: true) { selected in outputPath = selected } }
                     Button(action: { copyToClipboard(outputPath) }) {
-                        Image(systemName: "doc.on.doc").help("경로 복사")
+                        Image(systemName: "doc.on.doc").help(label("경로 복사", "Copy Path"))
                     }
                 }
             }
@@ -168,7 +180,7 @@ struct ContentView: View {
 
     private var overallQualityHeader: some View {
         HStack(alignment: .center) {
-            Label("전체 품질", systemImage: "chart.bar.xaxis")
+            Label(label("전체 품질", "Overall Quality"), systemImage: "chart.bar.xaxis")
                 .font(.headline)
             Text(overallQualityGrade.label)
                 .bold()
@@ -178,7 +190,7 @@ struct ContentView: View {
                 .background(overallQualityGrade.color.opacity(0.14))
                 .clipShape(Capsule())
             Spacer()
-            Text("평균 파일 품질점수: \(String(format: "%.1f", avgFileQualityScore))/100")
+            Text(label("평균 파일 품질점수: \(String(format: "%.1f", avgFileQualityScore))/100", "Avg File Quality Score: \(String(format: "%.1f", avgFileQualityScore))/100"))
                 .font(.subheadline)
                 .foregroundColor(.secondary)
         }
@@ -186,13 +198,13 @@ struct ContentView: View {
 
     private var statisticsSummary: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("전체 통계").font(.headline)
-            Label("총 파일 수: \(analyses.count)", systemImage: "doc.on.doc.fill")
-            Label("총 라인 수: \(totalLines)", systemImage: "text.alignleft")
-            Label("총 함수 수: \(totalFuncs)", systemImage: "function")
-            Label("총 주석 수: \(totalComments)", systemImage: "text.bubble")
-            Label("총 공백 라인 수: \(totalBlanks)", systemImage: "rectangle.and.pencil.and.ellipsis")
-            Label(String(format: "주석률: %.1f%%", commentRate), systemImage: "percent")
+            Text(label("전체 통계", "Statistics")).font(.headline)
+            Label(label("총 파일 수: \(analyses.count)", "Total Files: \(analyses.count)"), systemImage: "doc.on.doc.fill")
+            Label(label("총 라인 수: \(totalLines)", "Total Lines: \(totalLines)"), systemImage: "text.alignleft")
+            Label(label("총 함수 수: \(totalFuncs)", "Total Functions: \(totalFuncs)"), systemImage: "function")
+            Label(label("총 주석 수: \(totalComments)", "Total Comments: \(totalComments)"), systemImage: "text.bubble")
+            Label(label("총 공백 라인 수: \(totalBlanks)", "Total Blank Lines: \(totalBlanks)"), systemImage: "rectangle.and.pencil.and.ellipsis")
+            Label(label(String(format: "주석률: %.1f%%", commentRate), String(format: "Comment Rate: %.1f%%", commentRate)), systemImage: "percent")
             if !qualityMsg.isEmpty {
                 Label(qualityMsg, systemImage: "checkmark.seal")
                     .foregroundColor(.blue)
@@ -204,15 +216,33 @@ struct ContentView: View {
 
     private var overallDistributionChart: some View {
         Chart {
-            BarMark(x: .value("비율", codePct), y: .value("구성", "전체 코드"))
+            BarMark(
+                x: .value(label("비율", "Ratio"), codePct),
+                y: .value(label("구성", "Category"), label("전체 코드", "Code"))
+            )
                 .foregroundStyle(.blue)
-                .annotation(position: .overlay) { Text(String(format: "%.0f%% 코드", codePct)).font(.caption2).foregroundColor(.white) }
-            BarMark(x: .value("비율", commentPct), y: .value("구성", "전체 코드"))
+                .annotation(position: .overlay) {
+                    Text(label(String(format: "%.0f%% 코드", codePct), String(format: "%.0f%% Code", codePct)))
+                        .font(.caption2).foregroundColor(.white)
+                }
+            BarMark(
+                x: .value(label("비율", "Ratio"), commentPct),
+                y: .value(label("구성", "Category"), label("전체 코드", "Code"))
+            )
                 .foregroundStyle(.green)
-                .annotation(position: .overlay) { Text(String(format: "%.0f%% 주석", commentPct)).font(.caption2).foregroundColor(.white) }
-            BarMark(x: .value("비율", blankPct), y: .value("구성", "전체 코드"))
+                .annotation(position: .overlay) {
+                    Text(label(String(format: "%.0f%% 주석", commentPct), String(format: "%.0f%% Comment", commentPct)))
+                        .font(.caption2).foregroundColor(.white)
+                }
+            BarMark(
+                x: .value(label("비율", "Ratio"), blankPct),
+                y: .value(label("구성", "Category"), label("전체 코드", "Code"))
+            )
                 .foregroundStyle(.gray)
-                .annotation(position: .overlay) { Text(String(format: "%.0f%% 공백", blankPct)).font(.caption2).foregroundColor(.white) }
+                .annotation(position: .overlay) {
+                    Text(label(String(format: "%.0f%% 공백", blankPct), String(format: "%.0f%% Blank", blankPct)))
+                        .font(.caption2).foregroundColor(.white)
+                }
         }
         .frame(height: 70)
         .chartXScale(domain: 0...100)
@@ -229,7 +259,7 @@ struct ContentView: View {
             ForEach(filteredAnalyses) { file in
                 let score = fileQualityScore(file)
                 SectorMark(
-                    angle: .value("품질점수", score),
+                    angle: .value(label("품질점수", "Quality Score"), score),
                     innerRadius: .ratio(0.6),
                     angularInset: 1
                 )
@@ -252,21 +282,21 @@ struct ContentView: View {
         .chartLegend(.hidden)
         .overlay {
             if analyses.isEmpty && !isProcessing {
-                Text("분석 데이터 없음").foregroundColor(.secondary)
+                Text(label("분석 데이터 없음", "No analysis data")).foregroundColor(.secondary)
             }
         }
     }
 
     private var chartsVStack: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("코드 분포").font(.headline)
+            Text(label("코드 분포", "Code Distribution")).font(.headline)
             overallDistributionChart
-            Text("파일별 품질 (점수)").font(.headline)
+            Text(label("파일별 품질 (점수)", "File Quality (Score)")).font(.headline)
                 .padding(.top)
             if !analyses.isEmpty {
                 fileQualityChart
             } else {
-                ContentUnavailableView("분석 데이터 없음", systemImage: "chart.pie")
+                ContentUnavailableView(label("분석 데이터 없음", "No analysis data"), systemImage: "chart.pie")
                     .frame(height: 200)
             }
         }
@@ -275,9 +305,9 @@ struct ContentView: View {
 
     private var warningsSummary: some View {
         VStack(alignment: .leading, spacing: 7) {
-            Text("주요 경고 (\(overallProjectWarnings.count)개)").font(.headline)
+            Text(label("주요 경고 (\(overallProjectWarnings.count)개)", "Top Warnings (\(overallProjectWarnings.count))")).font(.headline)
             if overallProjectWarnings.isEmpty && !isProcessing {
-                Label("발견된 주요 경고 없음", systemImage: "checkmark.circle.fill")
+                Label(label("발견된 주요 경고 없음", "No major warnings found"), systemImage: "checkmark.circle.fill")
                     .foregroundColor(.green)
             } else if isProcessing {
                 ProgressView().scaleEffect(0.8)
@@ -306,7 +336,8 @@ struct ContentView: View {
                             .cornerRadius(6)
                         }
                         if overallProjectWarnings.count > 7 {
-                            Text("외 \(overallProjectWarnings.count - 7)건 더 있음 (파일 상세 또는 전체 로그 확인)")
+                            Text(label("외 \(overallProjectWarnings.count - 7)건 더 있음 (파일 상세 또는 전체 로그 확인)",
+                                       "\(overallProjectWarnings.count - 7) more. See file detail or full log"))
                                 .font(.footnote)
                                 .foregroundColor(.gray)
                         }
@@ -331,13 +362,13 @@ struct ContentView: View {
 
     private var searchSortControls: some View {
         HStack(spacing: 16) {
-            TextField("파일명/경고 메시지/유형 검색...", text: $fileSearch)
+            TextField(label("파일명/경고 메시지/유형 검색...", "Search filename/warning/type..."), text: $fileSearch)
                 .textFieldStyle(RoundedBorderTextFieldStyle())
                 .frame(maxWidth: 320)
             Picker("정렬", selection: $sortKey) {
-                Text("품질점수").tag("품질점수")
-                Text("경고수").tag("경고수")
-                Text("파일명").tag("파일명")
+                Text(label("품질점수", "Quality Score")).tag("품질점수")
+                Text(label("경고수", "Warning Count")).tag("경고수")
+                Text(label("파일명", "Filename")).tag("파일명")
             }
             .labelsHidden().frame(width: 120)
             Button(action: { sortDesc.toggle() }) {
@@ -348,7 +379,7 @@ struct ContentView: View {
             Spacer()
             if selectedFileID != nil {
                 Button(action: { selectedFileID = nil }) {
-                    Label("파일 상세 닫기", systemImage: "xmark.circle.fill")
+                    Label(label("파일 상세 닫기", "Close File Detail"), systemImage: "xmark.circle.fill")
                 }
                 .buttonStyle(.bordered)
                 .tint(.red)
@@ -359,8 +390,8 @@ struct ContentView: View {
 
     private var fileTableView: some View {
         Table(filteredAnalyses, selection: $selectedFileID) {
-            // "파일명" 컬럼 
-            TableColumn("파일명") { fileAnalysis in
+            // "파일명" 컬럼
+            TableColumn(label("파일명", "Filename")) { fileAnalysis in
                 Text(fileAnalysis.file)
                     .lineLimit(1)
                     .truncationMode(.middle)
@@ -368,7 +399,7 @@ struct ContentView: View {
             .width(min: 150, ideal: 250)
 
             // "품질점수" 컬럼
-            TableColumn("품질점수") { fileAnalysis in
+            TableColumn(label("품질점수", "Quality Score")) { fileAnalysis in
                 let score = fileQualityScore(fileAnalysis)
                 Text(String(format: "%.1f", score))
                     .foregroundColor(score < 60 ? .red : score < 70 ? .orange : score < 80 ? .yellow : .primary)
@@ -377,64 +408,60 @@ struct ContentView: View {
             .width(80)
 
             // "경고수" 컬럼
-            TableColumn("경고수") { fileAnalysis in
+            TableColumn(label("경고수", "Warning Count")) { fileAnalysis in
                 Text("\(fileAnalysis.warnings.count)")
                     .foregroundColor(fileAnalysis.warnings.filter { $0.severity >= .medium }.count > 0 ? .orange : (fileAnalysis.warnings.count > 0 ? .blue : .secondary))
             }
             .width(60)
 
             // "라인 수" 컬럼 (value 키 경로 대신 content 클로저 사용)
-            TableColumn("라인 수") { fileAnalysis in
+            TableColumn(label("라인 수", "Line Count")) { fileAnalysis in
                 Text("\(fileAnalysis.lines)")
             }
             .width(60)
 
             // "함수 수" 컬럼 (value 키 경로 대신 content 클로저 사용)
-            TableColumn("함수 수") { fileAnalysis in
+            TableColumn(label("함수 수", "Function Count")) { fileAnalysis in
                 Text("\(fileAnalysis.funcCount)")
             }
             .width(60)
 
             // "평균 함수 길이" 컬럼 (content 클로저 사용)
-            TableColumn("평균 함수 길이") { fileAnalysis in
+            TableColumn(label("평균 함수 길이", "Avg Func Length")) { fileAnalysis in
                 Text(String(format: "%.1f", fileAnalysis.avgFuncLength))
             }
             .width(100)
 
             // "가장 긴 함수" 컬럼 (content 클로저 사용)
-            TableColumn("가장 긴 함수") { fileAnalysis in
+            TableColumn(label("가장 긴 함수", "Longest Function")) { fileAnalysis in
                 Text("\(fileAnalysis.longestFunc)")
             }
             .width(80)
 
             // "주석률" 컬럼 (content 클로저 사용)
-            TableColumn("주석률") { fileAnalysis in
+            TableColumn(label("주석률", "Comment Rate")) { fileAnalysis in
                 let rate = fileAnalysis.codeLines > 0 ? Double(fileAnalysis.commentLines) / Double(fileAnalysis.codeLines) * 100 : 0
                 Text(String(format: "%.1f%%", rate))
             }
             .width(70)
         }
         .frame(minHeight: 220, maxHeight: .infinity)
-        .onChange(of: selectedFileID) { newID, _ in // iOS 17+ 스타일, 이전 버전이면 of: selectedFileID, perform: { newID in ... }
-            if newID != nil {
-                showDetailedResult = true
-            }
-        }
+        // row 클릭 시 selectedFileID만 갱신, showDetailedResult는 사용자가 토글로만 조작
         .overlay {
             if analyses.isEmpty && !isProcessing {
-                ContentUnavailableView("분석할 파일을 선택하세요.", systemImage: "doc.text.magnifyingglass")
+                ContentUnavailableView(label("분석할 파일을 선택하세요.", "Select a file to analyze."), systemImage: "doc.text.magnifyingglass")
             }
         }
     }
 
     @ViewBuilder
     private func fileDetailGroup(detail: DocGenCore.FileAnalysisResult) -> some View {
-        GroupBox(label: Label("파일 상세: \(detail.file)", systemImage: "doc.plaintext")) {
+        GroupBox(label: Label(label("파일 상세", "File Detail"), systemImage: "doc.plaintext")) {
             VStack(alignment: .leading, spacing: 10) {
                 HStack {
-                    Text("총 라인: \(detail.lines), 코드: \(detail.codeLines), 주석: \(detail.commentLines), 공백: \(detail.blankLines)")
+                    Text(label("총 라인: \(detail.lines), 코드: \(detail.codeLines), 주석: \(detail.commentLines), 공백: \(detail.blankLines)", "Total Lines: \(detail.lines), Code: \(detail.codeLines), Comments: \(detail.commentLines), Blank: \(detail.blankLines)"))
                     Spacer()
-                    Text("품질 점수: \(String(format: "%.1f", fileQualityScore(detail)))")
+                    Text(label("품질 점수: \(String(format: "%.1f", fileQualityScore(detail)))", "Quality Score: \(String(format: "%.1f", fileQualityScore(detail)))"))
                         .bold()
                 }
                 .font(.subheadline)
@@ -442,12 +469,12 @@ struct ContentView: View {
                 .padding(.bottom, 5)
 
                 if detail.warnings.isEmpty {
-                    Label("이 파일에는 특이 경고가 없습니다.", systemImage: "checkmark.seal.fill")
+                    Label(label("이 파일에는 특이 경고가 없습니다.", "No significant warnings in this file."), systemImage: "checkmark.seal.fill")
                         .foregroundColor(.green)
                         .padding()
                         .frame(maxWidth: .infinity, alignment: .center)
                 } else {
-                    Text("경고 (\(detail.warnings.count)개):").font(.headline).padding(.bottom, 2)
+                    Text(label("경고 (\(detail.warnings.count)개):", "Warnings (\(detail.warnings.count)):")).font(.headline).padding(.bottom, 2)
                     ScrollView(.vertical, showsIndicators: true) {
                         VStack(alignment: .leading, spacing: 8) {
                             // 심각도 높은 순으로 정렬
@@ -463,12 +490,12 @@ struct ContentView: View {
                                             .foregroundColor(.primary)
                                             .fixedSize(horizontal: false, vertical: true)
                                         if let line = warning.line {
-                                            Text("라인: \(line)")
+                                            Text(label("라인: \(line)", "Line: \(line)"))
                                                 .font(.caption)
                                                 .foregroundColor(.gray)
                                         }
                                         if let suggestion = warning.suggestion, !suggestion.isEmpty {
-                                            Text("제안: \(suggestion)")
+                                            Text(label("제안: \(suggestion)", "Suggestion: \(suggestion)"))
                                                 .font(.caption)
                                                 .foregroundColor(.blue)
                                                 .fixedSize(horizontal: false, vertical: true)
@@ -478,7 +505,8 @@ struct ContentView: View {
                                 .padding(8)
                                 .background(warningColor(warning.severity).opacity(0.08))
                                 .cornerRadius(8)
-                                .help("파일: \(warning.filePath)\n라인: \(warning.line ?? 0)\n유형: \(warning.type.rawValue)\n심각도: \(warning.severity.displayName)")
+                                .help(label("파일: \(warning.filePath)\n라인: \(warning.line ?? 0)\n유형: \(warning.type.rawValue)\n심각도: \(warning.severity.displayName)",
+                                            "File: \(warning.filePath)\nLine: \(warning.line ?? 0)\nType: \(warning.type.rawValue)\nSeverity: \(warning.severity.displayName)"))
                             }
                         }
                     }
@@ -491,7 +519,7 @@ struct ContentView: View {
     }
 
     private var logGroup: some View {
-        GroupBox(label: Label("실행 로그", systemImage: "terminal")) {
+        GroupBox(label: Label(label("실행 로그", "Execution Log"), systemImage: "terminal")) {
             ScrollView(.vertical, showsIndicators: true) {
                 VStack(alignment: .leading, spacing: 3) {
                     ForEach(logMessages, id: \.self) { msg in
@@ -524,12 +552,12 @@ struct ContentView: View {
                             .progressViewStyle(.circular)
                             .tint(.white)
                             .padding(.trailing, 5)
-                        Text("분석 중...")
+                        Text(label("분석 중...", "Analyzing..."))
                             .fontWeight(.semibold)
                     } else {
                         Image(systemName: "doc.text.magnifyingglass")
                             .font(.title3)
-                        Text("분석 시작")
+                        Text(label("분석 시작", "Analyze"))
                             .fontWeight(.semibold)
                             .font(.headline)
                     }
@@ -547,7 +575,7 @@ struct ContentView: View {
             HStack {
                 Spacer()
                 Toggle(isOn: $showDetailedResult) {
-                    Text("분석 후 파일 상세 자동 표시")
+                    Text(label("상세 결과 보기", "Show Detailed Result"))
                         .font(.caption)
                 }
                 .toggleStyle(.switch)
@@ -555,27 +583,56 @@ struct ContentView: View {
             .padding(.top, 5)
 
             if isProcessing {
-                ProgressView("파일 분석 중입니다. 잠시만 기다려주세요...")
+                ProgressView(label("파일 분석 중입니다. 잠시만 기다려주세요...", "Analyzing files. Please wait..."))
                     .progressViewStyle(LinearProgressViewStyle())
                     .padding(.top, 8)
             }
         }
         .padding(.vertical, 15)
     }
+    
 
     var body: some View {
         ScrollView(.vertical) {
             VStack(alignment: .leading, spacing: 20) {
-                Text("Swift 정적 분석기")
+                HStack {
+                    Spacer()
+                    Picker(selection: $appLanguage, label: EmptyView()) {
+                        Text("한국어").tag("ko")
+                        Text("English").tag("en")
+                    }
+                    .pickerStyle(SegmentedPickerStyle())
+                    .frame(width: 160)
+                    .onChange(of: appLanguage) { newLang in
+                        DocGenCore.currentLanguage = newLang
+                        status = newLang == "en" ? "Ready to start analysis." : "시작할 준비가 되었습니다."
+                    }
+                }
+                .padding(.horizontal, 12)
+                .padding(.top, 12)
+                .padding(.bottom, 4)
+                .background(.ultraThinMaterial)
+                .cornerRadius(10)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10)
+                        .stroke(Color.primary.opacity(0.05), lineWidth: 0.5)
+                )
+                .shadow(radius: 1, y: 0.5)
+
+                Text(label("Swift 정적 분석기", "Swift Static Analysis"))
                     .font(.system(size: 36, weight: .bold, design: .rounded))
-                    .padding(.bottom, 4)
+                    .padding(.bottom, 6)
+
+                Divider()
+                    .padding(.bottom, 2)
+
                 pathInputGroup
                 overallQualityHeader
                 dashboardHStack
                 Divider()
                 searchSortControls
                 fileTableView
-                if let detail = selectedFile {
+                if let detail = selectedFile, showDetailedResult {
                     fileDetailGroup(detail: detail)
                 }
                 logGroup
@@ -591,6 +648,8 @@ struct ContentView: View {
             Alert(title: Text("오류 발생"), message: Text(alertMessage), dismissButton: .default(Text("확인")))
         }
         .onAppear {
+            DocGenCore.currentLanguage = appLanguage
+            status = appLanguage == "en" ? "Ready to start analysis." : "시작할 준비가 되었습니다."
             #if os(macOS)
             if let window = NSApplication.shared.windows.first {
                 window.isMovableByWindowBackground = true
@@ -622,8 +681,8 @@ struct ContentView: View {
     private func runDocGen() {
         guard !rootPath.isEmpty, !outputPath.isEmpty else { return }
         isProcessing = true
-        status = "분석 중…"
-        logMessages.append("▶️ 분석 시작: \(Date())\n  Root: \(rootPath)\n  Output: \(outputPath)")
+        status = label("분석 중…", "Analyzing...")
+        logMessages.append(label("▶️ 분석 시작: \(Date())\n  Root: \(rootPath)\n  Output: \(outputPath)", "▶️ Analysis started: \(Date())\n  Root: \(rootPath)\n  Output: \(outputPath)"))
         if !recentRootPaths.contains(rootPath) { recentRootPaths.insert(rootPath, at: 0) }
         if !recentOutputPaths.contains(outputPath) { recentOutputPaths.insert(outputPath, at: 0) }
         if recentRootPaths.count > 3 { recentRootPaths = Array(recentRootPaths.prefix(3)) }
@@ -643,7 +702,17 @@ struct ContentView: View {
                 overallProjectWarnings = dashboard.warnings
                 logMessages.append(dashboard.summaryText)
                 status = dashboard.summaryText
-                selectedFileID = nil
+                // 분석 후 상세 자동 표시 옵션에 따라 파일 상세 자동 선택/해제
+                if showDetailedResult, !dashboard.analyses.isEmpty {
+                    // 경고가 가장 많은 파일의 id를 선택
+                    if let mostWarningsFile = dashboard.analyses.max(by: { $0.warnings.count < $1.warnings.count }) {
+                        selectedFileID = mostWarningsFile.id
+                    } else {
+                        selectedFileID = nil
+                    }
+                } else {
+                    selectedFileID = nil
+                }
             }
         }
     }
