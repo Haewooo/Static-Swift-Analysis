@@ -11,7 +11,6 @@ class DocGenCore {
     enum WarningType: String, CaseIterable, Identifiable {
         case longFunction = "긴 함수"
         case highComplexity = "높은 복잡도"
-        case magicNumber = "매직 넘버 사용"
         case unusedVariable = "미사용 변수"
         case styleViolation = "코드 스타일 위반"
         case securityIssue = "보안 관련 경고"
@@ -179,8 +178,6 @@ class DocGenCore {
         // 1. 함수 관련 지표 및 경고 분석
         let funcAnalysisResult = analyzeFunctionMetrics(lines: lines, filePath: filePath)
         allWarnings.append(contentsOf: funcAnalysisResult.warnings)
-        // 2. 매직 넘버 탐지
-        allWarnings.append(contentsOf: findMagicNumbers(lines: lines, filePath: filePath))
         // 3. 미사용 파일 레벨 변수 탐지
         allWarnings.append(contentsOf: findUnusedFileLevelVariables(lines: lines, filePath: filePath, functionLocalVariables: funcAnalysisResult.localVariablesInFunctions))
         // 4. 코드 스타일 위반 탐지
@@ -299,43 +296,84 @@ class DocGenCore {
         return (funcCount, avgLen, maxLen, warnings, allLocalVariablesInFunctions)
     }
 
-    // 2. 매직 넘버 탐지
-    private static func findMagicNumbers(lines: [String], filePath: String) -> [Warning] {
-        var warnings: [Warning] = []
-        for (idx, line) in lines.enumerated() {
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
-            guard !trimmed.contains("//") else { continue }
-            let numberPattern = #"\b\d+\b"#
-            if let regex = try? NSRegularExpression(pattern: numberPattern), let _ = regex.firstMatch(in: trimmed, range: NSRange(location: 0, length: trimmed.utf16.count)) {
-                warnings.append(Warning(id: UUID(), filePath: filePath, line: idx+1, type: .magicNumber, severity: .medium, message: "매직 넘버가 코드에 직접 포함되어 있습니다: '\(trimmed)'", suggestion: "상수로 추출하여 의미를 명확히 하세요."))
-            }
-        }
-        return warnings
-    }
-
     // 3. 미사용 파일 레벨 변수 탐지
+    // Detects true file-level variables (not inside any type/extension/protocol) and warns if unused.
+    // - Only considers variables declared at the file scope (not inside class/struct/enum/extension/protocol/actor).
+    // - Ignores variables declared inside type bodies or extensions.
+    // - Usage check avoids counting the declaration line itself as usage.
+    // - Uses precise word boundaries for variable detection.
     private static func findUnusedFileLevelVariables(lines: [String], filePath: String, functionLocalVariables: [String: ([String], Set<String>)]) -> [Warning] {
         var warnings: [Warning] = []
-        var fileLevelVars: [String: Int] = [:]
-        var usedFileVars: Set<String> = []
-        var inTypeDecl: Bool = false
+        var fileLevelVars: [String: Int] = [:] // name -> line number
+        var scopeStack: [String] = [] // Track the current nesting (e.g. class, struct, enum, extension, protocol, actor)
+        var braceBalanceStack: [Int] = [] // Track { count for each scope
+        let typeDeclRegex = try! NSRegularExpression(pattern: #"^\s*(class|struct|enum|extension|protocol|actor)\b"#)
+        let varDeclRegex = try! NSRegularExpression(pattern: #"^\s*(var|let)\s+([A-Za-z_][A-Za-z0-9_]*)\b"#)
+        // Step 1: Identify file-level variable/constant declarations
         for (idx, line) in lines.enumerated() {
             let trimmed = line.trimmingCharacters(in: .whitespaces)
-            if trimmed.range(of: #"^(class|struct|enum)\s"#, options: .regularExpression) != nil {
-                inTypeDecl = true
+            // Detect scope entry: class/struct/enum/extension/protocol/actor
+            if let match = typeDeclRegex.firstMatch(in: trimmed, range: NSRange(location: 0, length: trimmed.utf16.count)) {
+                // Entering a type/extension scope
+                if let typeRange = Range(match.range(at: 1), in: trimmed) {
+                    let typeKeyword = String(trimmed[typeRange])
+                    scopeStack.append(typeKeyword)
+                    // Count braces on this line and push to stack for this scope
+                    let openBraces = trimmed.filter { $0 == "{" }.count
+                    braceBalanceStack.append(openBraces)
+                }
             }
-            if let range = trimmed.range(of: #"^(var|let)\s+([A-Za-z_][A-Za-z0-9_]*)"#, options: .regularExpression), !inTypeDecl {
-                let name = String(trimmed[range].split(separator: " ")[1])
-                fileLevelVars[name] = idx+1
+            // Track braces to detect leaving type scopes
+            var openCount = line.filter { $0 == "{" }.count
+            var closeCount = line.filter { $0 == "}" }.count
+            if !braceBalanceStack.isEmpty {
+                braceBalanceStack[braceBalanceStack.count-1] += openCount - closeCount
+                // If brace count for this scope drops to zero or below, pop scope
+                while let last = braceBalanceStack.last, last <= 0, !scopeStack.isEmpty {
+                    braceBalanceStack.removeLast()
+                    scopeStack.removeLast()
+                }
             }
-            for v in fileLevelVars.keys {
-                if trimmed.range(of: "\\b\(v)\\b", options: .regularExpression) != nil {
-                    usedFileVars.insert(v)
+            // Only collect variables when not inside any type/extension/protocol/actor
+            if scopeStack.isEmpty {
+                if let match = varDeclRegex.firstMatch(in: trimmed, range: NSRange(location: 0, length: trimmed.utf16.count)) {
+                    // Get variable name
+                    if let nameRange = Range(match.range(at: 2), in: trimmed) {
+                        let name = String(trimmed[nameRange])
+                        if !name.isEmpty && name != "_" {
+                            fileLevelVars[name] = idx+1
+                        }
+                    }
                 }
             }
         }
-        for (v, lineNum) in fileLevelVars where !usedFileVars.contains(v) {
-            warnings.append(Warning(id: UUID(), filePath: filePath, line: lineNum, type: .unusedVariable, severity: .low, message: "파일 레벨 변수/상수 '\(v)'가 사용되지 않았습니다.", suggestion: "불필요하다면 삭제하세요."))
+        // Step 2: For each file-level variable, check for usage elsewhere in the file (excluding its own declaration line)
+        for (varName, declLine) in fileLevelVars {
+            var isUsed = false
+            let varPattern = #"(?<![A-Za-z0-9_])\#(varName)\b"#
+            let varRegex = try! NSRegularExpression(pattern: varPattern)
+            for (idx, line) in lines.enumerated() {
+                if idx + 1 == declLine { continue } // skip declaration line itself
+                // Avoid false positives: skip comments
+                let trimmed = line.trimmingCharacters(in: .whitespaces)
+                if trimmed.hasPrefix("//") { continue }
+                // Only count as usage if variable name appears as whole word
+                if varRegex.firstMatch(in: line, range: NSRange(location: 0, length: line.utf16.count)) != nil {
+                    isUsed = true
+                    break
+                }
+            }
+            if !isUsed {
+                warnings.append(Warning(
+                    id: UUID(),
+                    filePath: filePath,
+                    line: declLine,
+                    type: .unusedVariable,
+                    severity: .low,
+                    message: "파일 레벨 변수/상수 '\(varName)'가 사용되지 않았습니다.",
+                    suggestion: "불필요하다면 삭제하세요."
+                ))
+            }
         }
         return warnings
     }
@@ -565,7 +603,7 @@ class DocGenCore {
                 let detailedWarningsText = f.warnings.map { warning -> String in
                     let lineInfo = warning.line.map { " (L\($0))" } ?? "" // 라인 정보가 있으면 " (L라인번호)" 형태로, 없으면 빈 문자열
                     return "[\(warning.severity.displayName)/\(warning.type.rawValue)] \(warning.message)\(lineInfo)"
-                }.joined(separator: " | ") 
+                }.joined(separator: " | ")
                 index += "- 상세 경고: \(detailedWarningsText)\n"
             }
             index += "\n"

@@ -555,7 +555,7 @@ struct ContentView: View {
             .padding(.top, 5)
 
             if isProcessing {
-                ProgressView("파일 분석 및 문서 생성 중입니다. 잠시만 기다려주세요...")
+                ProgressView("파일 분석 중입니다. 잠시만 기다려주세요...")
                     .progressViewStyle(LinearProgressViewStyle())
                     .padding(.top, 8)
             }
@@ -622,7 +622,7 @@ struct ContentView: View {
     private func runDocGen() {
         guard !rootPath.isEmpty, !outputPath.isEmpty else { return }
         isProcessing = true
-        status = "분석/문서화 중…"
+        status = "분석 중…"
         logMessages.append("▶️ 분석 시작: \(Date())\n  Root: \(rootPath)\n  Output: \(outputPath)")
         if !recentRootPaths.contains(rootPath) { recentRootPaths.insert(rootPath, at: 0) }
         if !recentOutputPaths.contains(outputPath) { recentOutputPaths.insert(outputPath, at: 0) }
